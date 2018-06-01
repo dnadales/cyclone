@@ -28,10 +28,24 @@ library:
 executables:
   cyclone:
     main: Main.hs
-    source-dirs: app
+    source-dirs: cyclone
     ghc-options:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
     - cyclone
+
+  cyclone-spawn:
+    main: Main.hs
+    source-dirs: cyclone-spawn
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - turtle
+    - directory
+    - async
+    - text
+    - foldl
