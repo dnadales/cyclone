@@ -47,5 +47,4 @@ executables:
     - turtle
     - directory
     - async
-    - text
     - foldl

@@ -6,11 +6,10 @@ import           Control.Concurrent.Async (async, mapConcurrently, wait)
 import qualified Control.Foldl            as Fold
 import           Control.Monad            (void)
 import           Data.Monoid              (mempty)
-import           Data.Text                (Text)
 import           System.Directory         (getTemporaryDirectory)
 import           Turtle                   (decodeString, fold, input, inshell,
-                                           liftIO, lineToText, nl, output, sh,
-                                           shell, (</>))
+                                           liftIO, lineToText, nl, output,
+                                           (</>))
 import qualified Turtle
 
 -- | 'cyclone-spawn' will spawn multiple programs, and redirect their output to
@@ -30,7 +29,8 @@ main = do
     where
       runPrograms tmp = do
           (n, line) <- nl $ input cfgPath
-          let outFile = tmp </> decodeString ("program-" ++ show n)
+          let sfx = show (n :: Int)
+              outFile = tmp </> decodeString ("program-" ++ sfx)
               cmd = lineToText line
           liftIO $ async $ output outFile (inshell cmd mempty)
 
