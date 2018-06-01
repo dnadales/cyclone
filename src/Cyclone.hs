@@ -1,6 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE DeriveGeneric      #-}
-{-# LANGUAGE TemplateHaskell    #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Cyclone
     (runCyclone, runCycloneSlave)
 where
@@ -13,6 +11,7 @@ import           Control.Distributed.Process                        (NodeId,
                                                                      RemoteTable,
                                                                      getSelfPid,
                                                                      match,
+                                                                     matchAny,
                                                                      monitor,
                                                                      receiveWait,
                                                                      say, send,
@@ -37,6 +36,8 @@ import           GHC.Generics                                       (Generic)
 import           Network.Socket                                     (HostName,
                                                                      ServiceName)
 
+import           Cyclone.Messages                                   (Peers (Peers),
+                                                                     mkNumber)
 import           Cyclone.State                                      (State,
                                                                      mkState,
                                                                      neighbor,
@@ -44,11 +45,6 @@ import           Cyclone.State                                      (State,
                                                                      setPeers,
                                                                      thisPid)
 
--- | Message used to communicate the list of peers.
-newtype Peers = Peers [ProcessId]
-    deriving (Show, Typeable, Generic)
-
-instance Binary Peers
 
 cycloneNode :: Int -> Process ()
 cycloneNode i = do
@@ -59,6 +55,8 @@ cycloneNode i = do
     spawnLocal (talker st)
     forever $ receiveWait [ match $ handlePeers st
                           , match $ handleMonitorNotification st
+                          , matchAny $ \msg -> say $
+                              "Message not handled: " ++ show msg
                           ]
     where
       handlePeers :: State -> Peers -> Process ()
@@ -68,10 +66,12 @@ cycloneNode i = do
 
       talker :: State -> Process ()
       talker st = forever $ do
-          n <- neighbor st
+          nPid <- neighbor st
           liftIO $ threadDelay 1000000
-          liftIO $ putStrLn $ "This is my buddy: " ++ show n
-          say $ "This is my buddy: " ++ show n
+          liftIO $ putStrLn $ "This is my buddy: " ++ show nPid
+          say $ "This is my buddy: " ++ show nPid
+          n <- mkNumber 1
+          send nPid n
 
       handleMonitorNotification :: State
                                 -> ProcessMonitorNotification

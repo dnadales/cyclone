@@ -78,4 +78,3 @@ removePeer st pid = liftIO $ atomically $ do
     oldPeers <- readTVar (_peers st)
     setPeersSTM st (filter (/= pid) oldPeers)
 
-

@@ -31,6 +31,7 @@ library:
   - distributed-process-simplelocalnet
   - binary
   - stm
+  - time
   
 executables:
   cyclone:
