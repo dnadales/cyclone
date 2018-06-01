@@ -1,12 +1,21 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric      #-}
+{-# LANGUAGE TemplateHaskell    #-}
 module Cyclone
     (runCyclone, runCycloneSlave)
 where
 
+import           Control.Concurrent                                 (threadDelay)
 import           Control.Distributed.Process                        (NodeId,
                                                                      Process,
+                                                                     ProcessId,
                                                                      RemoteTable,
-                                                                     say, spawn,
+                                                                     getSelfPid,
+                                                                     match,
+                                                                     receiveWait,
+                                                                     say, send,
+                                                                     spawn,
+                                                                     spawnLocal,
                                                                      terminate)
 import           Control.Distributed.Process.Backend.SimpleLocalnet (Backend, initializeBackend,
                                                                      startMaster,
@@ -16,17 +25,43 @@ import           Control.Distributed.Process.Closure                (mkClosure,
                                                                      remotable)
 import           Control.Distributed.Process.Node                   (initRemoteTable,
                                                                      runProcess)
-import           Control.Monad                                      (forM)
+import           Control.Monad                                      (forM,
+                                                                     forever)
 import           Control.Monad.IO.Class                             (liftIO)
+import           Data.Binary                                        (Binary)
+import           Data.Typeable                                      (Typeable)
+import           GHC.Generics                                       (Generic)
 import           Network.Socket                                     (HostName,
                                                                      ServiceName)
 
-import           Control.Concurrent                                 (threadDelay)
+import           Cyclone.State                                      (State,
+                                                                     mkState,
+                                                                     neighbor,
+                                                                     setPeers)
 
-cycloneNode ::Int ->  Process ()
+-- | Message used to communicate the list of peers.
+newtype Peers = Peers [ProcessId]
+    deriving (Show, Typeable, Generic)
+
+instance Binary Peers
+
+cycloneNode :: Int -> Process ()
 cycloneNode i = do
     liftIO $ putStrLn $ "Hello, I got " ++ show i
     say $ "Hello, I got " ++ show i
+    myPid <- getSelfPid
+    st <- mkState myPid
+    spawnLocal (talker st)
+    forever $ receiveWait [ match $ handlePeers st ]
+    where
+      handlePeers :: State -> Peers -> Process ()
+      handlePeers st (Peers ps) = do
+          setPeers st ps
+
+      talker :: State -> Process ()
+      talker st = do --forever $ do
+          n <- neighbor st
+          say $ "This is my buddy: " ++ show n
 
 remotable ['cycloneNode]
 
@@ -42,9 +77,14 @@ runCyclone host port = do
 
 master :: Backend -> [NodeId] -> Process ()
 master backend slaves = do
+    -- Start the slaves.
     ps <- forM slaves $ \nid -> do
         say $ "Starting slave on " ++ show nid
         spawn nid $ $(mkClosure 'cycloneNode) (1 :: Int)
+    -- Send the process list to each slave
+    forM ps $ \pid ->
+        send pid (Peers ps)
+
     liftIO $ threadDelay 4000000
     terminateAllSlaves backend
 

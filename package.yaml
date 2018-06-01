@@ -28,8 +28,10 @@ library:
   - network
   - distributed-process
   - network-transport-tcp
-  - distributed-process-simplelocalnet  
-
+  - distributed-process-simplelocalnet
+  - binary
+  - stm
+  
 executables:
   cyclone:
     main: Main.hs
