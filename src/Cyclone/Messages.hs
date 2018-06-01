@@ -9,7 +9,11 @@ module Cyclone.Messages
     , Number
     , mkNumber
     , value
-    , timestamp)
+    , timestamp
+    , who
+      -- * Dump
+    , Dump (..)
+    )
 where
 
 import           Control.Distributed.Process (ProcessId)
@@ -29,12 +33,26 @@ instance Binary Peers
 data Number = Number
     { value     :: Double
     , timestamp :: Double
-    } deriving (Show, Eq, Ord, Typeable, Generic)
+    -- | Process id that sent the message.
+    , who       :: ProcessId
+    } deriving (Show, Typeable, Generic)
 
 instance Binary Number
 
+instance Ord Number where
+    n <= m = timestamp n <= timestamp m
+
+instance Eq Number where
+    n == m = timestamp n == timestamp m
+
 -- | Make a @Number@ message, creating a timestamp with the current time, and adding it to it.
-mkNumber :: MonadIO m => Double -> m Number
-mkNumber d = liftIO $ do
+mkNumber :: MonadIO m => ProcessId -> Double -> m Number
+mkNumber pid d = liftIO $ do
     t <- realToFrac <$> getPOSIXTime
-    return $ Number d t
+    return $ Number d t pid
+
+-- | Stop sending messages, and dump the messages received so far.
+data Dump = Dump
+        deriving (Show, Typeable, Generic)
+
+instance Binary Dump
