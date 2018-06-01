@@ -10,10 +10,11 @@ module Cyclone.State
     , setPeers
     , removePeer
     , neighbor
+    , thisPid
     )
 where
 
-import           Control.Concurrent.STM      (atomically, retry)
+import           Control.Concurrent.STM      (STM, atomically, retry)
 import           Control.Concurrent.STM.TVar (TVar, modifyTVar', newTVarIO,
                                               readTVar, readTVarIO, writeTVar)
 import           Control.Distributed.Process (ProcessId)
@@ -24,7 +25,7 @@ data State = State
     { -- | List of peers known so far.
       _peers    :: TVar [ProcessId]
       -- | Process id of the current process.
-    , _thisPid  :: ProcessId
+    , thisPid   :: ProcessId
       -- | Neighbor of the current process (it can be itself).
     , _neighbor :: TVar (Maybe ProcessId)
     }
@@ -39,8 +40,11 @@ mkState pid = liftIO $
 -- | When a peer is set, the neighbor will be determined.
 --
 setPeers :: MonadIO m => State -> [ProcessId] -> m ()
-setPeers st ps = liftIO $ atomically $ do
-    let n = determineNeighbor (_thisPid st) ps
+setPeers st ps = liftIO $ atomically $ setPeersSTM st ps
+
+setPeersSTM :: State -> [ProcessId] -> STM ()
+setPeersSTM st ps = do
+    let n = determineNeighbor (thisPid st) ps
     writeTVar (_peers st) ps
     writeTVar (_neighbor st) n
 
@@ -69,6 +73,9 @@ neighbor st = liftIO $ atomically $ do
 
 -- | Remove a peer from the list. If the process that was removed is the
 -- neighbor of the current process, then the new neighbor is updated.
-removePeer :: MonadIO m => State -> [ProcessId] -> m ()
-removePeer = undefined
+removePeer :: MonadIO m => State -> ProcessId -> m ()
+removePeer st pid = liftIO $ atomically $ do
+    oldPeers <- readTVar (_peers st)
+    setPeersSTM st (filter (/= pid) oldPeers)
+
 

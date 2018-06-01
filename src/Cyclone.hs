@@ -9,9 +9,11 @@ import           Control.Concurrent                                 (threadDelay
 import           Control.Distributed.Process                        (NodeId,
                                                                      Process,
                                                                      ProcessId,
+                                                                     ProcessMonitorNotification (ProcessMonitorNotification),
                                                                      RemoteTable,
                                                                      getSelfPid,
                                                                      match,
+                                                                     monitor,
                                                                      receiveWait,
                                                                      say, send,
                                                                      spawn,
@@ -26,6 +28,7 @@ import           Control.Distributed.Process.Closure                (mkClosure,
 import           Control.Distributed.Process.Node                   (initRemoteTable,
                                                                      runProcess)
 import           Control.Monad                                      (forM,
+                                                                     forM_,
                                                                      forever)
 import           Control.Monad.IO.Class                             (liftIO)
 import           Data.Binary                                        (Binary)
@@ -37,7 +40,9 @@ import           Network.Socket                                     (HostName,
 import           Cyclone.State                                      (State,
                                                                      mkState,
                                                                      neighbor,
-                                                                     setPeers)
+                                                                     removePeer,
+                                                                     setPeers,
+                                                                     thisPid)
 
 -- | Message used to communicate the list of peers.
 newtype Peers = Peers [ProcessId]
@@ -52,16 +57,27 @@ cycloneNode i = do
     myPid <- getSelfPid
     st <- mkState myPid
     spawnLocal (talker st)
-    forever $ receiveWait [ match $ handlePeers st ]
+    forever $ receiveWait [ match $ handlePeers st
+                          , match $ handleMonitorNotification st
+                          ]
     where
       handlePeers :: State -> Peers -> Process ()
       handlePeers st (Peers ps) = do
+          forM_ (filter (/= thisPid st) ps) monitor
           setPeers st ps
 
       talker :: State -> Process ()
-      talker st = do --forever $ do
+      talker st = forever $ do
           n <- neighbor st
+          liftIO $ threadDelay 1000000
+          liftIO $ putStrLn $ "This is my buddy: " ++ show n
           say $ "This is my buddy: " ++ show n
+
+      handleMonitorNotification :: State
+                                -> ProcessMonitorNotification
+                                -> Process ()
+      handleMonitorNotification st (ProcessMonitorNotification _ pid _) =
+          removePeer st pid
 
 remotable ['cycloneNode]
 
@@ -85,7 +101,7 @@ master backend slaves = do
     forM ps $ \pid ->
         send pid (Peers ps)
 
-    liftIO $ threadDelay 4000000
+    liftIO $ threadDelay 10000000
     terminateAllSlaves backend
 
 runCycloneSlave :: HostName -> ServiceName -> IO ()
