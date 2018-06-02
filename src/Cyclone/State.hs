@@ -29,25 +29,31 @@ import           Control.Concurrent.STM.TQueue (TQueue, newTQueueIO, readTQueue,
 import           Control.Concurrent.STM.TVar   (TVar, modifyTVar', newTVarIO,
                                                 readTVar, readTVarIO, writeTVar)
 import           Control.Distributed.Process   (ProcessId)
+import           Control.Monad                 (unless, when)
 import           Control.Monad.IO.Class        (MonadIO, liftIO)
 import           Data.List                     (cycle, elemIndex)
+import           Data.Maybe                    (isJust)
 import           Data.Set                      (Set)
 import qualified Data.Set                      as Set
 import           System.Random                 (StdGen, mkStdGen, randomR)
 
-import           Cyclone.Messages              (Number)
+import           Cyclone.Messages              (Number, who)
 
 data State = State
     { -- | List of peers known so far.
-      _peers   :: TVar [ProcessId]
+      _peers      :: TVar [ProcessId]
       -- | Process id of the current process (where the state was created).
-    , thisPid  :: ProcessId
+    , thisPid     :: ProcessId
       -- | Set of numbers received so far.
-    , _inbound :: TVar (Set Number)
+    , _inbound    :: TVar (Set Number)
       -- | Can messages be sent?
-    , _talk    :: TVar Bool
+    , _talk       :: TVar Bool
     , -- | Random generator
-      _rndGen  :: MVar StdGen
+      _rndGen     :: MVar StdGen
+    , -- | Outbound queue
+      _outbound   :: TQueue Number
+      -- | Number (if any) awaiting for acknowledgment.
+    , _waitingAck :: TVar (Maybe Number)
     }
 
 -- | Create a new state, setting the given process id as the current process,
@@ -60,6 +66,8 @@ mkState pid seed = liftIO $
           <*> newTVarIO Set.empty
           <*> newTVarIO False -- Don't talk at the beginning.
           <*> newMVar (mkStdGen seed)
+          <*> newTQueueIO
+          <*> newTVarIO Nothing -- This process is not awaiting ACK.
 
 -- | When a peer is set, the neighbor will be determined.
 --
@@ -90,8 +98,13 @@ getPeers st = liftIO $ atomically $ do
 -- acknowledgment, then it is removed from it.
 appendNumber :: MonadIO m => State -> Number -> m ()
 appendNumber st n = liftIO $ atomically $ do
+    -- If the number we got was sent by us, it means the message round-tripped,
+    -- so all the nodes got it.
+    when (who n == thisPid st) (writeTVar (_waitingAck st) Nothing)
+    -- Resend the number if we don't have it.
+    ns <- readTVar (_inbound st)
+    unless (n `Set.member` ns) (enqueueNumberSTM st n)
     modifyTVar' (_inbound st) (Set.insert n)
-    -- modifyTVar' (_waiting st) (Set.delete n)
 
 -- | Retrieve all the numbers received so far.
 getReceivedNumbers :: MonadIO m => State -> m [Number]
@@ -117,4 +130,27 @@ getNumber st = liftIO $ modifyMVar (_rndGen st) genValidDouble
         genValidDouble g = let (v, g') = randomR (0, 1) g in
             if v == 0 then genValidDouble g else return (g', v)
 
+-- | Wait till an acknowledgment has been sent.
+waitAct :: MonadIO m => State -> m ()
+waitAct st = liftIO $ atomically $ do
+    mN <- readTVar (_waitingAck st)
+    when (isJust mN) retry
 
+-- | Add a @Number@ message to the queue.
+enqueueNumber :: MonadIO m => State -> Number -> m ()
+enqueueNumber st n = liftIO $ atomically $ enqueueNumberSTM st n
+
+enqueueNumberSTM :: State -> Number -> STM ()
+enqueueNumberSTM st n = do
+    writeTQueue (_outbound st) n
+    when (who n == thisPid st) (writeTVar (_waitingAck st) (Just n))
+
+-- | Dequeue a @Number@ message.
+dequeueNumber :: MonadIO m => State -> m Number
+dequeueNumber st = liftIO $ atomically $ readTQueue (_outbound st)
+
+-- | Re-enqueue a waiting number.
+reEnqueueWaiting :: MonadIO m => State -> m ()
+reEnqueueWaiting st = liftIO $ atomically $ do
+    mN <- readTVar (_waitingAck st)
+    maybe (return ()) (enqueueNumberSTM st) mN
