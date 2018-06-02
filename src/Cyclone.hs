@@ -42,14 +42,19 @@ import           GHC.Generics                                       (Generic)
 import           Network.Socket                                     (HostName,
                                                                      ServiceName)
 
+import           Cyclone.Config                                     (Config,
+                                                                     sendFor,
+                                                                     waitFor,
+                                                                     withSeed)
 import           Cyclone.Messages                                   (Dump (Dump),
                                                                      Number,
                                                                      Peers (Peers),
                                                                      QuietPlease (QuietPlease),
                                                                      mkNumber,
-                                                                     who)
+                                                                     value, who)
 import           Cyclone.State                                      (State, appendNumber,
                                                                      canTalk,
+                                                                     getNumber,
                                                                      getPeers,
                                                                      getReceivedNumbers,
                                                                      mkState,
@@ -60,10 +65,11 @@ import           Cyclone.State                                      (State, appe
                                                                      thisPid)
 
 
+-- | Start a node with the given seed for the random number generator.
 cycloneNode :: Int -> Process ()
-cycloneNode i = do
+cycloneNode seed = do
     myPid     <- getSelfPid
-    st        <- mkState myPid
+    st        <- mkState myPid seed
     startTalk st
     _ <- spawnLocal (talker st)
     forever $ receiveWait [ match $ handlePeers st
@@ -83,16 +89,17 @@ cycloneNode i = do
       talker :: State -> Process ()
       talker st = do
           b <- canTalk st
-          if b
-              then do
-                  ps <- getPeers st
-                  n <- mkNumber (thisPid st) 1
-                  -- Send to all the process, excluding itself.
-                  let ps' = filter (/= thisPid st) ps
-                  handleNumber st n
-                  forM_ ps' (`send` n)
-                  talker st
-              else return ()
+          when b $ do
+              ps <- getPeers st
+              d  <- getNumber st
+              n  <- mkNumber (thisPid st) 1
+              -- Send to all the process, excluding itself.
+              let ps' = filter (/= thisPid st) ps
+              -- This process register the number it generated, since it is
+              -- faster than performing a network operation.
+              handleNumber st n
+              forM_ ps' (`send` n)
+              talker st
 
       handleNumber :: State -> Number -> Process ()
       handleNumber st n = appendNumber st n
@@ -109,40 +116,45 @@ cycloneNode i = do
       handleDump :: State -> Dump -> Process ()
       handleDump st _ = do
           ns <- getReceivedNumbers st
-          say $ "I got " ++ show (length ns) ++ " numbers."
+          let ms = sort ns
+              vals = sum $ map (uncurry (*)) $ zip [1..] (value <$> ms)
+          say $ show (length ns, vals)
+
 
 remotable ['cycloneNode]
 
 myRemoteTable :: RemoteTable
 myRemoteTable = Cyclone.__remoteTable initRemoteTable
 
-runCyclone :: HostName
+runCyclone :: Config
+           -> HostName
            -> ServiceName
            -> IO ()
-runCyclone host port = do
+runCyclone cfg host port = do
     backend <- initializeBackend host port myRemoteTable
-    startMaster backend (master backend)
+    startMaster backend (master cfg backend)
 
-master :: Backend -> [NodeId] -> Process ()
-master backend slaves = do
+master :: Config -> Backend -> [NodeId] -> Process ()
+master cfg  backend slaves = do
     -- Start the slaves.
     ps <- forM slaves $ \nid -> do
         say $ "Starting slave on " ++ show nid
-        spawn nid $ $(mkClosure 'cycloneNode) (1 :: Int)
+        spawn nid $ $(mkClosure 'cycloneNode) (withSeed cfg)
     -- Send the process list to each slave
     forM ps (`send` (Peers ps))
-    -- TODO: here use the 'send-for' argument
-    liftIO $ threadDelay 1000000
+    -- Allow the nodes to send messages
+    delay $ (sendFor cfg) * 1000000
     forM ps (`send` QuietPlease)
-
-    -- TODO: here we have to determine some time to allow for the messages to
-    -- finish arriving.
-    liftIO $ threadDelay 1000000
+    let (waitForMgs, waitForCalc) = (floor (w * 0.7), floor (w * 0.3))
+        w = toRational $ waitFor cfg * 1000000
+    -- Use the @waitFor@ argument to determine a period in which the messages
+    -- can be received before performing the final calculation.
+    delay waitForMgs
     forM ps (`send` Dump)
-
-    -- TODO: here use the 'wait-for' argument
-    liftIO $ threadDelay 100000
+    delay waitForCalc
     terminateAllSlaves backend
+    where
+      delay mus = liftIO $ threadDelay $ mus
 
 runCycloneSlave :: HostName -> ServiceName -> IO ()
 runCycloneSlave host port = do

@@ -14,7 +14,8 @@ description:         Please see the README on GitHub at <https://github.com/capi
 
 dependencies:
 - base >= 4.7 && < 5
-
+- random
+  
 ghc-options:
 - -Wall
 - -Wcompat
@@ -33,6 +34,7 @@ library:
   - stm
   - time
   - containers
+  - either
   
 executables:
   cyclone:

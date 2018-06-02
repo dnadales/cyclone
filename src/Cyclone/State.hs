@@ -17,9 +17,12 @@ module Cyclone.State
       -- * Inbound queue manipulation
     , appendNumber
     , getReceivedNumbers
+    -- * Random number generation
+    , getNumber
     )
 where
 
+import           Control.Concurrent.MVar       (MVar, modifyMVar, newMVar)
 import           Control.Concurrent.STM        (STM, atomically, retry)
 import           Control.Concurrent.STM.TQueue (TQueue, newTQueueIO, readTQueue,
                                                 tryReadTQueue, writeTQueue)
@@ -30,6 +33,7 @@ import           Control.Monad.IO.Class        (MonadIO, liftIO)
 import           Data.List                     (cycle, elemIndex)
 import           Data.Set                      (Set)
 import qualified Data.Set                      as Set
+import           System.Random                 (StdGen, mkStdGen, randomR)
 
 import           Cyclone.Messages              (Number)
 
@@ -42,15 +46,20 @@ data State = State
     , _inbound :: TVar [Number]
       -- | Can messages be sent?
     , _talk    :: TVar Bool
+    , -- | Random generator
+      _rndGen  :: MVar StdGen
     }
 
--- | Create a new state, setting the given process id as the current process.
-mkState :: MonadIO m => ProcessId -> m State
-mkState pid = liftIO $
+-- | Create a new state, setting the given process id as the current process,
+-- and creating a random number generator with the given seed.
+--
+mkState :: MonadIO m => ProcessId -> Int -> m State
+mkState pid seed = liftIO $
     State <$> newTVarIO []
           <*> pure pid
           <*> newTVarIO []
           <*> newTVarIO False -- Don't talk at the beginning.
+          <*> newMVar (mkStdGen seed)
 
 -- | When a peer is set, the neighbor will be determined.
 --
@@ -99,3 +108,12 @@ canTalk st = liftIO $ readTVarIO (_talk st)
 -- | Signal that a process has to stop talking.
 stopTalk :: MonadIO m => State -> m ()
 stopTalk st = liftIO $ atomically $ writeTVar (_talk st) False
+
+-- | Get a random number, updating the state of the generator.
+getNumber :: MonadIO m => State -> m Double
+getNumber st = liftIO $ modifyMVar (_rndGen st) genValidDouble
+    where
+        genValidDouble g = let (v, g') = randomR (0, 1) g in
+            if v == 0 then genValidDouble g else return (g', v)
+
+

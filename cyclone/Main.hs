@@ -2,15 +2,16 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 
-import           Control.Monad         (unless)
+import           Control.Monad         (forM_, unless)
 import           System.Console.Docopt (Arguments, Docopt, command, docopt,
                                         exitWithUsage, getArgWithDefault,
                                         isPresent, longOption, parseArgsOrExit)
 import           System.Environment    (getArgs)
+import           System.Random         (randomIO)
 import           Text.Read             (readEither)
 
 import           Cyclone               (runCyclone, runCycloneSlave)
-
+import           Cyclone.Config        (Config, mkConfig)
 
 patterns :: Docopt
 patterns = [docopt|
@@ -50,24 +51,51 @@ main :: IO ()
 main = do
     args  <- parseArgsOrExit patterns =<< getArgs
     port  <- getPort args
+    cfg   <- getCfg args
     -- Note that we don't validate the host string.
     let host = getArgWithDefault args defaultHost (longOption "host")
     if (args `isPresent` command "slave")
        then runCycloneSlave host port
-       else runCyclone host port
+       else runCyclone cfg host port
     where
       getPort :: Arguments -> IO String
       getPort args = do
           let portStr = getArgWithDefault args defaultPort (longOption "port")
-          val <- case readEither portStr of
-              Left _ -> do
-                  putStrLn $ "Port number should be an integer. Got " ++ portStr
-                  exitWithUsage patterns
-              Right (val :: Int) ->
-                  return val
+          val <- getInt args "port" defaultPort
           unless (minPortValue <= val && val <= maxPortValue) $ do
               putStrLn $ "Invalid port number: " ++ show val
                        ++ ", a port number should be in the range "
                        ++ show minPortValue ++ " - " ++ show maxPortValue
               exitWithUsage patterns
           return portStr
+      getInt :: Arguments -> String -> String ->  IO Int
+      getInt args what deflt = do
+          let valStr = getArgWithDefault args deflt (longOption what)
+          case readEither valStr of
+              Left _ -> do
+                  putStrLn $ what ++ " should be an integer. Got " ++ valStr
+                  exitWithUsage patterns
+              Right (val :: Int) ->
+                  return val
+      getCfg :: Arguments -> IO Config
+      getCfg args = do
+          sFor  <- getSendFor args
+          wFor  <- getWaitFor args
+          wSeed <- getWithSeed args
+          case mkConfig sFor wFor wSeed of
+              Left errs -> do
+                  forM_ errs putStrLn
+                  exitWithUsage patterns
+              Right cfg ->
+                  return cfg
+      getSendFor :: Arguments -> IO Int
+      getSendFor args = getInt args "send-for" defaultSendFor
+      getWaitFor :: Arguments -> IO Int
+      getWaitFor args = getInt args "wait-for" defaultWaitFor
+      getWithSeed :: Arguments -> IO Int
+      getWithSeed args = do
+          -- Determine a random seed in case no seed was selected.
+          defaultSeed <- show <$> (randomIO :: IO Int)
+          getInt args "with-seed" defaultSeed
+      defaultSendFor = "1"
+      defaultWaitFor = "1"
