@@ -11,6 +11,9 @@ module Cyclone.State
     , removePeer
     , getPeers
     , thisPid
+    , startTalk
+    , canTalk
+    , stopTalk
       -- * Inbound queue manipulation
     , appendNumber
     , getReceivedNumbers
@@ -37,6 +40,8 @@ data State = State
     , thisPid  :: ProcessId
       -- | List of numbers received so far.
     , _inbound :: TVar [Number]
+      -- | Can messages be sent?
+    , _talk    :: TVar Bool
     }
 
 -- | Create a new state, setting the given process id as the current process.
@@ -45,6 +50,7 @@ mkState pid = liftIO $
     State <$> newTVarIO []
           <*> pure pid
           <*> newTVarIO []
+          <*> newTVarIO False -- Don't talk at the beginning.
 
 -- | When a peer is set, the neighbor will be determined.
 --
@@ -81,3 +87,15 @@ appendNumber st n = liftIO $ atomically $ do
 -- | Retrieve all the numbers received so far.
 getReceivedNumbers :: MonadIO m => State -> m [Number]
 getReceivedNumbers st = liftIO $ readTVarIO (_inbound st)
+
+-- | Signal that a process can start talking.
+startTalk :: MonadIO m => State -> m ()
+startTalk st = liftIO $ atomically $ writeTVar (_talk st) True
+
+-- | Can a process start talking?
+canTalk :: MonadIO m => State -> m Bool
+canTalk st = liftIO $ readTVarIO (_talk st)
+
+-- | Signal that a process has to stop talking.
+stopTalk :: MonadIO m => State -> m ()
+stopTalk st = liftIO $ atomically $ writeTVar (_talk st) False

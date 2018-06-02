@@ -11,8 +11,9 @@ module Cyclone.Messages
     , value
     , timestamp
     , who
-      -- * Dump
+      -- * Finish
     , Dump (..)
+    , QuietPlease (..)
     )
 where
 
@@ -51,7 +52,13 @@ mkNumber pid d = liftIO $ do
     t <- realToFrac <$> getPOSIXTime
     return $ Number d t pid
 
--- | Stop sending messages, and dump the messages received so far.
+-- | Stop sending messages.
+data QuietPlease = QuietPlease
+        deriving (Show, Typeable, Generic)
+
+instance Binary QuietPlease
+
+-- | Dump the messages received so far.
 data Dump = Dump
         deriving (Show, Typeable, Generic)
 

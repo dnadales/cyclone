@@ -3,6 +3,7 @@ module Cyclone
     (runCyclone, runCycloneSlave)
 where
 
+import           Control.Concurrent                                 (forkIO)
 import qualified Data.Set                                           as Set
 
 import           Control.Concurrent                                 (threadDelay)
@@ -44,28 +45,32 @@ import           Network.Socket                                     (HostName,
 import           Cyclone.Messages                                   (Dump (Dump),
                                                                      Number,
                                                                      Peers (Peers),
+                                                                     QuietPlease (QuietPlease),
                                                                      mkNumber,
                                                                      who)
 import           Cyclone.State                                      (State, appendNumber,
+                                                                     canTalk,
                                                                      getPeers,
                                                                      getReceivedNumbers,
                                                                      mkState,
                                                                      removePeer,
                                                                      setPeers,
+                                                                     startTalk,
+                                                                     stopTalk,
                                                                      thisPid)
 
 
 cycloneNode :: Int -> Process ()
 cycloneNode i = do
-    liftIO $ putStrLn $ "Hello, I got " ++ show i
-    say $ "Hello, I got " ++ show i
     myPid     <- getSelfPid
     st        <- mkState myPid
-    talkerPid <- spawnLocal (talker st)
+    startTalk st
+    _ <- spawnLocal (talker st)
     forever $ receiveWait [ match $ handlePeers st
                           , match $ handleMonitorNotification st
                           , match $ handleNumber st
-                          , match $ handleDump st talkerPid
+                          , match $ handleQuiet st
+                          , match $ handleDump st
                           , matchAny $ \msg -> say $
                               "Message not handled: " ++ show msg
                           ]
@@ -77,13 +82,17 @@ cycloneNode i = do
 
       talker :: State -> Process ()
       talker st = do
-          forever $ do
-              ps <- getPeers st
-              n <- mkNumber (thisPid st) 1
-              -- Send to all the process, excluding itself.
-              let ps' = filter (/= thisPid st) ps
-              handleNumber st n
-              forM_ ps' (`send` n)
+          b <- canTalk st
+          if b
+              then do
+                  ps <- getPeers st
+                  n <- mkNumber (thisPid st) 1
+                  -- Send to all the process, excluding itself.
+                  let ps' = filter (/= thisPid st) ps
+                  handleNumber st n
+                  forM_ ps' (`send` n)
+                  talker st
+              else return ()
 
       handleNumber :: State -> Number -> Process ()
       handleNumber st n = appendNumber st n
@@ -94,18 +103,13 @@ cycloneNode i = do
       handleMonitorNotification st (ProcessMonitorNotification _ pid _) =
           removePeer st pid
 
-      handleDump :: State -> ProcessId -> Dump -> Process ()
-      handleDump st talkerPid _ = do
-          exit talkerPid "Time's up!"
-          -- TODO: make this configurable
-          liftIO $ threadDelay 4000000
+      handleQuiet :: State -> QuietPlease -> Process ()
+      handleQuiet st _ = stopTalk st
+
+      handleDump :: State -> Dump -> Process ()
+      handleDump st _ = do
           ns <- getReceivedNumbers st
           say $ "I got " ++ show (length ns) ++ " numbers."
-          -- liftIO $ do
-          --     putStrLn $ "These are the numbers: "
-          --     forM_ (sort ns) $ \n ->
-          --         putStrLn $ "    " ++ show n
-
 
 remotable ['cycloneNode]
 
@@ -126,14 +130,18 @@ master backend slaves = do
         say $ "Starting slave on " ++ show nid
         spawn nid $ $(mkClosure 'cycloneNode) (1 :: Int)
     -- Send the process list to each slave
-    forM ps $ \pid ->
-        send pid (Peers ps)
+    forM ps (`send` (Peers ps))
     -- TODO: here use the 'send-for' argument
     liftIO $ threadDelay 1000000
-    forM ps $ \pid ->
-        send pid Dump
+    forM ps (`send` QuietPlease)
+
+    -- TODO: here we have to determine some time to allow for the messages to
+    -- finish arriving.
+    liftIO $ threadDelay 1000000
+    forM ps (`send` Dump)
+
     -- TODO: here use the 'wait-for' argument
-    liftIO $ threadDelay 6000000
+    liftIO $ threadDelay 100000
     terminateAllSlaves backend
 
 runCycloneSlave :: HostName -> ServiceName -> IO ()
