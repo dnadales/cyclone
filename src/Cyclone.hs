@@ -47,16 +47,12 @@ import           Cyclone.Messages                                   (Dump (Dump)
                                                                      mkNumber,
                                                                      who)
 import           Cyclone.State                                      (State, appendNumber,
-                                                                     dequeueNumber,
-                                                                     enqueueNumber,
+                                                                     getPeers,
                                                                      getReceivedNumbers,
                                                                      mkState,
-                                                                     neighbor,
                                                                      removePeer,
                                                                      setPeers,
-                                                                     thisPid,
-                                                                     waitForEmptyQueue,
-                                                                     waiting)
+                                                                     thisPid)
 
 
 cycloneNode :: Int -> Process ()
@@ -66,7 +62,6 @@ cycloneNode i = do
     myPid     <- getSelfPid
     st        <- mkState myPid
     talkerPid <- spawnLocal (talker st)
-    _         <- spawnLocal (sender st)
     forever $ receiveWait [ match $ handlePeers st
                           , match $ handleMonitorNotification st
                           , match $ handleNumber st
@@ -82,38 +77,16 @@ cycloneNode i = do
 
       talker :: State -> Process ()
       talker st = do
-          nPid <- neighbor st -- WAIT! Till we have a process to send a number to
-          say $ "My neighbor is: " ++ show nPid
           forever $ do
-              waitForEmptyQueue st
-              -- liftIO $ threadDelay 1000
+              ps <- getPeers st
               n <- mkNumber (thisPid st) 1
-              enqueueNumber st n
+              -- Send to all the process, excluding itself.
+              let ps' = filter (/= thisPid st) ps
+              handleNumber st n
+              forM_ ps' (`send` n)
 
-      -- | Monitors the outbound queue of the state, and send the @Number@s as
-      -- new messages are enqueued by the 'talker' process.
-      sender :: State -> Process ()
-      sender st = forever $ do
-          nPid <- neighbor st
-          n <- dequeueNumber st
---          say $ "Sending to " ++ show nPid
-          send nPid n
-
-      -- | Upon receiving a new @Number@:
-      --
-      -- - if the message was not send by the current node, then the number is
-      --   added to the outbound queue so that it is sent to the neighbor.
-      --
-      -- - if the message was sent by the current node, then the number is not
-      --   forwarded, and it is removed from the list of messages waiting for
-      --   acknowledgment, since a message going back to its emitter means that
-      --   it circulated through all the nodes.
-      --
       handleNumber :: State -> Number -> Process ()
-      handleNumber st n = do
-          appendNumber st n
-          when (thisPid st /= who n) $
-              enqueueNumber st n
+      handleNumber st n = appendNumber st n
 
       handleMonitorNotification :: State
                                 -> ProcessMonitorNotification
@@ -125,11 +98,9 @@ cycloneNode i = do
       handleDump st talkerPid _ = do
           exit talkerPid "Time's up!"
           -- TODO: make this configurable
-          liftIO $ threadDelay 3000000
+          liftIO $ threadDelay 4000000
           ns <- getReceivedNumbers st
           say $ "I got " ++ show (length ns) ++ " numbers."
-          ws <- waiting st
-          say $ "I got " ++ show (Set.size ws) ++ " not acknowledged numbers."
           -- liftIO $ do
           --     putStrLn $ "These are the numbers: "
           --     forM_ (sort ns) $ \n ->
@@ -162,7 +133,7 @@ master backend slaves = do
     forM ps $ \pid ->
         send pid Dump
     -- TODO: here use the 'wait-for' argument
-    liftIO $ threadDelay 5000000
+    liftIO $ threadDelay 6000000
     terminateAllSlaves backend
 
 runCycloneSlave :: HostName -> ServiceName -> IO ()

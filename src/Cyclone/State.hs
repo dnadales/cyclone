@@ -9,16 +9,9 @@ module Cyclone.State
       -- * Functions on the peers list
     , setPeers
     , removePeer
-    , neighbor
+    , getPeers
     , thisPid
-      -- * Queue manipulation
-      -- ** Outbound queue
-    , enqueueNumber
-    , dequeueNumber
-    , waitForEmptyQueue
-      -- ** Waiting queue
-    , waiting
-      -- ** Inbound queue
+      -- * Inbound queue manipulation
     , appendNumber
     , getReceivedNumbers
     )
@@ -39,17 +32,11 @@ import           Cyclone.Messages              (Number)
 
 data State = State
     { -- | List of peers known so far.
-      _peers    :: TVar [ProcessId]
-      -- | Process id of the current process.
-    , thisPid   :: ProcessId
-      -- | Neighbor of the current process (it can be itself).
-    , _neighbor :: TVar (Maybe ProcessId)
-      -- | Outbound queue (these messages have to be sent to the neighbors).
-    , _outbound :: TQueue Number
-      -- | Set of messages that haven't received an acknowledgment.
-    , _waiting  :: TVar (Set Number)
+      _peers   :: TVar [ProcessId]
+      -- | Process id of the current process (where the state was created).
+    , thisPid  :: ProcessId
       -- | List of numbers received so far.
-    , _inbound  :: TVar [Number]
+    , _inbound :: TVar [Number]
     }
 
 -- | Create a new state, setting the given process id as the current process.
@@ -57,9 +44,6 @@ mkState :: MonadIO m => ProcessId -> m State
 mkState pid = liftIO $
     State <$> newTVarIO []
           <*> pure pid
-          <*> newTVarIO Nothing -- At the beginning there's no neighbor.
-          <*> newTQueueIO
-          <*> newTVarIO Set.empty
           <*> newTVarIO []
 
 -- | When a peer is set, the neighbor will be determined.
@@ -68,33 +52,7 @@ setPeers :: MonadIO m => State -> [ProcessId] -> m ()
 setPeers st ps = liftIO $ atomically $ setPeersSTM st ps
 
 setPeersSTM :: State -> [ProcessId] -> STM ()
-setPeersSTM st ps = do
-    let n = determineNeighbor (thisPid st) ps
-    writeTVar (_peers st) ps
-    writeTVar (_neighbor st) n
-
--- | Determine the neighbor by simply looking at the element that follows the
--- given process id.
---
---
--- Pre-condition:
---
--- - The process id must be a member of the given list.
---
--- If the pre-condition is not met, then the function returns Nothing.
-determineNeighbor :: ProcessId -> [ProcessId] -> Maybe ProcessId
-determineNeighbor pid [] = Nothing
-determineNeighbor pid ps =
-    (ps'!!).(+ 1) <$> elemIndex pid ps
-    where ps' = cycle ps
-
--- Retrieves the neighbor. The function will block until a neighbor is found.
-neighbor :: MonadIO m => State -> m ProcessId
-neighbor st = liftIO $ atomically $ do
-    mn <- readTVar (_neighbor st)
-    case mn of
-        Just n  -> return n
-        Nothing -> retry
+setPeersSTM st ps = writeTVar (_peers st) ps
 
 -- | Remove a peer from the list. If the process that was removed is the
 -- neighbor of the current process, then the new neighbor is updated.
@@ -103,17 +61,13 @@ removePeer st pid = liftIO $ atomically $ do
     oldPeers <- readTVar (_peers st)
     setPeersSTM st (filter (/= pid) oldPeers)
 
--- | Add a @Number@ message to the queue.
-enqueueNumber :: MonadIO m => State -> Number -> m ()
-enqueueNumber st n = liftIO $ atomically $ writeTQueue (_outbound st) n
-
--- | Dequeue a @Number@ message. The message is put in the list of messages
--- that wait for an acknowledgment.
-dequeueNumber :: MonadIO m => State -> m Number
-dequeueNumber st = liftIO $ atomically $ do
-    n <- readTQueue (_outbound st)
-    modifyTVar' (_waiting st) (Set.insert n)
-    return n
+-- | Get the current list of peers, retrying if the list of peers is empty.
+getPeers :: MonadIO m => State -> m [ProcessId]
+getPeers st = liftIO $ atomically $ do
+    ps <- readTVar (_peers st)
+    if null ps
+        then retry
+        else return ps
 
 -- | Append a @Number@ to the list of numbers received so far.
 --
@@ -124,14 +78,6 @@ appendNumber st n = liftIO $ atomically $ do
     modifyTVar' (_inbound st) (n:)
     -- modifyTVar' (_waiting st) (Set.delete n)
 
-waitForEmptyQueue :: MonadIO m => State -> m ()
-waitForEmptyQueue st = liftIO $ atomically $ do
-    mElem <- tryReadTQueue (_outbound st)
-    maybe (return ()) (const retry) mElem
-
 -- | Retrieve all the numbers received so far.
 getReceivedNumbers :: MonadIO m => State -> m [Number]
 getReceivedNumbers st = liftIO $ readTVarIO (_inbound st)
-
-waiting :: MonadIO m => State -> m (Set Number)
-waiting st = liftIO $ readTVarIO (_waiting st)
