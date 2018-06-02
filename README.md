@@ -65,7 +65,6 @@ simulating node failures:
 stack exec cyclone -- slave -p 9091
 timeout 4 stack exec cyclone -- slave -p 9095
 timeout 7 stack exec cyclone -- slave -p 9096
-
 ```
 
 ## Manual testing
