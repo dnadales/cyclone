@@ -3,6 +3,8 @@ module Cyclone
     (runCyclone, runCycloneSlave)
 where
 
+import qualified Data.Set                                           as Set
+
 import           Control.Concurrent                                 (threadDelay)
 import           Control.Distributed.Process                        (NodeId,
                                                                      Process,
@@ -52,7 +54,8 @@ import           Cyclone.State                                      (State, appe
                                                                      neighbor,
                                                                      removePeer,
                                                                      setPeers,
-                                                                     thisPid)
+                                                                     thisPid,
+                                                                     waiting)
 
 
 cycloneNode :: Int -> Process ()
@@ -77,9 +80,12 @@ cycloneNode i = do
           setPeers st ps
 
       talker :: State -> Process ()
-      talker st = forever $ do
-              nPid <- neighbor st
-              liftIO $ threadDelay 1000
+      talker st = do
+          nPid <- neighbor st
+          say $ "My neighbor is: " ++ show nPid
+          forever $ do
+              nPid <- neighbor st -- WAIT! Till we have a process to send a number to
+              liftIO $ threadDelay 10000
               n <- mkNumber (thisPid st) 1
               enqueueNumber st n
 
@@ -89,12 +95,13 @@ cycloneNode i = do
       sender st = forever $ do
           nPid <- neighbor st
           n <- dequeueNumber st
+--          say $ "Sending to " ++ show nPid
           send nPid n
 
       -- | Upon receiving a new @Number@:
       --
       -- - if the message was not send by the current node, then the number is
-      --   sent to the neighbor.
+      --   added to the outbound queue so that it is sent to the neighbor.
       --
       -- - if the message was sent by the current node, then the number is not
       --   forwarded, and it is removed from the list of messages waiting for
@@ -116,12 +123,17 @@ cycloneNode i = do
       handleDump :: State -> ProcessId -> Dump -> Process ()
       handleDump st talkerPid _ = do
           exit talkerPid "Time's up!"
+          -- TODO: make this configurable
+          liftIO $ threadDelay 3000000
           ns <- getReceivedNumbers st
           say $ "I got " ++ show (length ns) ++ " numbers."
-          liftIO $ do
-              putStrLn $ "These are the numbers: "
-              forM_ (sort ns) $ \n ->
-                  putStrLn $ "    " ++ show n
+          ws <- waiting st
+          say $ "I got " ++ show (Set.size ws) ++ " not acknowledged numbers."
+          -- liftIO $ do
+          --     putStrLn $ "These are the numbers: "
+          --     forM_ (sort ns) $ \n ->
+          --         putStrLn $ "    " ++ show n
+
 
 remotable ['cycloneNode]
 
@@ -144,16 +156,12 @@ master backend slaves = do
     -- Send the process list to each slave
     forM ps $ \pid ->
         send pid (Peers ps)
-
     -- TODO: here use the 'send-for' argument
-    liftIO $ threadDelay 3000000
-
+    liftIO $ threadDelay 1000000
     forM ps $ \pid ->
         send pid Dump
-
     -- TODO: here use the 'wait-for' argument
     liftIO $ threadDelay 5000000
-
     terminateAllSlaves backend
 
 runCycloneSlave :: HostName -> ServiceName -> IO ()

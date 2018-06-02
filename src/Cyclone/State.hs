@@ -15,6 +15,8 @@ module Cyclone.State
       -- ** Outbound queue
     , enqueueNumber
     , dequeueNumber
+      -- ** Waiting queue
+    , waiting
       -- ** Inbound queue
     , appendNumber
     , getReceivedNumbers
@@ -54,7 +56,7 @@ mkState :: MonadIO m => ProcessId -> m State
 mkState pid = liftIO $
     State <$> newTVarIO []
           <*> pure pid
-          <*> newTVarIO Nothing -- At the beginning a node is its own neighbor.
+          <*> newTVarIO Nothing -- At the beginning there's no neighbor.
           <*> newTQueueIO
           <*> newTVarIO Set.empty
           <*> newTVarIO []
@@ -119,8 +121,11 @@ dequeueNumber st = liftIO $ atomically $ do
 appendNumber :: MonadIO m => State -> Number -> m ()
 appendNumber st n = liftIO $ atomically $ do
     modifyTVar' (_inbound st) (n:)
-    modifyTVar' (_waiting st) (Set.delete n)
+    -- modifyTVar' (_waiting st) (Set.delete n)
 
 -- | Retrieve all the numbers received so far.
 getReceivedNumbers :: MonadIO m => State -> m [Number]
 getReceivedNumbers st = liftIO $ readTVarIO (_inbound st)
+
+waiting :: MonadIO m => State -> m (Set Number)
+waiting st = liftIO $ readTVarIO (_waiting st)

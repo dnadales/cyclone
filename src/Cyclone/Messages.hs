@@ -35,15 +35,15 @@ data Number = Number
     , timestamp :: Double
     -- | Process id that sent the message.
     , who       :: ProcessId
-    } deriving (Show, Typeable, Generic)
+    } deriving (Show, Eq, Ord, Typeable, Generic)
 
 instance Binary Number
 
-instance Ord Number where
-    n <= m = timestamp n <= timestamp m
+-- instance Ord Number where
+--     n <= m = timestamp n <= timestamp m
 
-instance Eq Number where
-    n == m = timestamp n == timestamp m
+-- instance Eq Number where
+--     n == m = timestamp n == timestamp m
 
 -- | Make a @Number@ message, creating a timestamp with the current time, and adding it to it.
 mkNumber :: MonadIO m => ProcessId -> Double -> m Number
