@@ -90,9 +90,9 @@ cycloneNode seed = do
       talker st = do
           b <- canTalk st
           when b $ do
-              ps <- getPeers st
               d  <- getNumber st
-              n  <- mkNumber (thisPid st) 1
+              n  <- mkNumber (thisPid st) d
+              ps <- getPeers st
               -- Send to all the process, excluding itself.
               let ps' = filter (/= thisPid st) ps
               -- This process register the number it generated, since it is

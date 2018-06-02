@@ -22,7 +22,8 @@ Usage:
   cyclone slave [-hp]
 
 Options:
-  -h --host <string>        Host in which the node should be started.
+  -h --host <string>        Host in which the node should be started (defaults
+                            to "localhost").
 
   -p --port <number>        Port number in which the node should be started. If
                             not present the default port 9090 will be chosen.
