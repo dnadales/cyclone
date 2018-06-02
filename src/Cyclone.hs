@@ -101,6 +101,27 @@ cycloneNode seed = do
               forM_ ps' (`send` n)
               talker st
 
+      -- generator :: State -> Process ()
+      -- generator st = do
+      --     b <- canTalk st
+      --     when b $ do
+      --         waitForAck st -- TODO: should wait for ack
+      --         d  <- getNumber st
+      --         n  <- mkNumber (thisPid st) d
+      --         enqueueNumber st n
+      --         generator st
+
+      -- watchDog :: State -> Process ()
+      -- watchDog st = forever $ do
+      --     threadDelay 10000
+      --     reEnqueueWaiting st
+
+      -- sender :: State -> Process ()
+      -- sender st = do
+      --     nPid <- neighbor st
+      --     n <- dequeueNumber st
+      --     send nPid n
+
       handleNumber :: State -> Number -> Process ()
       handleNumber st n = appendNumber st n
 
@@ -116,10 +137,8 @@ cycloneNode seed = do
       handleDump :: State -> Dump -> Process ()
       handleDump st _ = do
           ns <- getReceivedNumbers st
-          let ms = sort ns
-              vals = sum $ map (uncurry (*)) $ zip [1..] (value <$> ms)
+          let vals = sum $ map (uncurry (*)) $ zip [1..] (value <$> ns)
           say $ show (length ns, vals)
-
 
 remotable ['cycloneNode]
 

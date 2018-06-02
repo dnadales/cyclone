@@ -42,8 +42,8 @@ data State = State
       _peers   :: TVar [ProcessId]
       -- | Process id of the current process (where the state was created).
     , thisPid  :: ProcessId
-      -- | List of numbers received so far.
-    , _inbound :: TVar [Number]
+      -- | Set of numbers received so far.
+    , _inbound :: TVar (Set Number)
       -- | Can messages be sent?
     , _talk    :: TVar Bool
     , -- | Random generator
@@ -57,7 +57,7 @@ mkState :: MonadIO m => ProcessId -> Int -> m State
 mkState pid seed = liftIO $
     State <$> newTVarIO []
           <*> pure pid
-          <*> newTVarIO []
+          <*> newTVarIO Set.empty
           <*> newTVarIO False -- Don't talk at the beginning.
           <*> newMVar (mkStdGen seed)
 
@@ -90,12 +90,13 @@ getPeers st = liftIO $ atomically $ do
 -- acknowledgment, then it is removed from it.
 appendNumber :: MonadIO m => State -> Number -> m ()
 appendNumber st n = liftIO $ atomically $ do
-    modifyTVar' (_inbound st) (n:)
+    modifyTVar' (_inbound st) (Set.insert n)
     -- modifyTVar' (_waiting st) (Set.delete n)
 
 -- | Retrieve all the numbers received so far.
 getReceivedNumbers :: MonadIO m => State -> m [Number]
-getReceivedNumbers st = liftIO $ readTVarIO (_inbound st)
+getReceivedNumbers st = fmap Set.toAscList $
+    liftIO $ readTVarIO (_inbound st)
 
 -- | Signal that a process can start talking.
 startTalk :: MonadIO m => State -> m ()
