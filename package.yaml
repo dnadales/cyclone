@@ -35,6 +35,7 @@ library:
   - time
   - containers
   - either
+  - async
   
 executables:
   cyclone:

@@ -18,7 +18,13 @@ module Cyclone.State
     , appendNumber
     , getReceivedNumbers
     -- * Random number generation
-    , getNumber
+    , getDouble
+    --  TODO: sort these functions
+    , waitForAck
+    , enqueueNumber
+    , reEnqueueWaiting
+    , dequeueNumber
+    , neighbor
     )
 where
 
@@ -54,6 +60,8 @@ data State = State
       _outbound   :: TQueue Number
       -- | Number (if any) awaiting for acknowledgment.
     , _waitingAck :: TVar (Maybe Number)
+      -- | Neighbor of the current process (it can be itself).
+    , _neighbor   :: TVar (Maybe ProcessId)
     }
 
 -- | Create a new state, setting the given process id as the current process,
@@ -68,6 +76,7 @@ mkState pid seed = liftIO $
           <*> newMVar (mkStdGen seed)
           <*> newTQueueIO
           <*> newTVarIO Nothing -- This process is not awaiting ACK.
+          <*> newTVarIO Nothing -- No neighbor at the beginning.
 
 -- | When a peer is set, the neighbor will be determined.
 --
@@ -75,7 +84,10 @@ setPeers :: MonadIO m => State -> [ProcessId] -> m ()
 setPeers st ps = liftIO $ atomically $ setPeersSTM st ps
 
 setPeersSTM :: State -> [ProcessId] -> STM ()
-setPeersSTM st ps = writeTVar (_peers st) ps
+setPeersSTM st ps = do
+    let n = determineNeighbor (thisPid st) ps
+    writeTVar (_peers st) ps
+    writeTVar (_neighbor st) n
 
 -- | Remove a peer from the list. If the process that was removed is the
 -- neighbor of the current process, then the new neighbor is updated.
@@ -94,17 +106,20 @@ getPeers st = liftIO $ atomically $ do
 
 -- | Append a @Number@ to the list of numbers received so far.
 --
--- If the number that is received in the set of messages awaiting
+-- If the number that is received is in the set of messages awaiting
 -- acknowledgment, then it is removed from it.
 appendNumber :: MonadIO m => State -> Number -> m ()
 appendNumber st n = liftIO $ atomically $ do
     -- If the number we got was sent by us, it means the message round-tripped,
     -- so all the nodes got it.
-    when (who n == thisPid st) (writeTVar (_waitingAck st) Nothing)
-    -- Resend the number if we don't have it.
-    ns <- readTVar (_inbound st)
-    unless (n `Set.member` ns) (enqueueNumberSTM st n)
-    modifyTVar' (_inbound st) (Set.insert n)
+    if who n == thisPid st
+       then do
+           writeTVar (_waitingAck st) Nothing
+           modifyTVar' (_inbound st) (Set.insert n)
+        else do
+            ns <- readTVar (_inbound st)
+            unless (n `Set.member` ns) (writeTQueue (_outbound st) n)
+            modifyTVar' (_inbound st) (Set.insert n)
 
 -- | Retrieve all the numbers received so far.
 getReceivedNumbers :: MonadIO m => State -> m [Number]
@@ -124,15 +139,15 @@ stopTalk :: MonadIO m => State -> m ()
 stopTalk st = liftIO $ atomically $ writeTVar (_talk st) False
 
 -- | Get a random number, updating the state of the generator.
-getNumber :: MonadIO m => State -> m Double
-getNumber st = liftIO $ modifyMVar (_rndGen st) genValidDouble
+getDouble :: MonadIO m => State -> m Double
+getDouble st = liftIO $ modifyMVar (_rndGen st) genValidDouble
     where
         genValidDouble g = let (v, g') = randomR (0, 1) g in
             if v == 0 then genValidDouble g else return (g', v)
 
 -- | Wait till an acknowledgment has been sent.
-waitAct :: MonadIO m => State -> m ()
-waitAct st = liftIO $ atomically $ do
+waitForAck :: MonadIO m => State -> m ()
+waitForAck st = liftIO $ atomically $ do
     mN <- readTVar (_waitingAck st)
     when (isJust mN) retry
 
@@ -153,4 +168,25 @@ dequeueNumber st = liftIO $ atomically $ readTQueue (_outbound st)
 reEnqueueWaiting :: MonadIO m => State -> m ()
 reEnqueueWaiting st = liftIO $ atomically $ do
     mN <- readTVar (_waitingAck st)
-    maybe (return ()) (enqueueNumberSTM st) mN
+    maybe (return ()) (writeTQueue (_outbound st)) mN
+
+-- | Retrieves the neighbor. The function will block until a neighbor is found.
+neighbor :: MonadIO m => State -> m ProcessId
+neighbor st = liftIO $ atomically $ do
+    mn <- readTVar (_neighbor st)
+    maybe retry return mn
+
+-- | Determine the neighbor by simply looking at the element that follows the
+-- given process id.
+--
+--
+-- Pre-condition:
+--
+-- - The process id must be a member of the given list.
+--
+-- If the pre-condition is not met, then the function returns Nothing.
+determineNeighbor :: ProcessId -> [ProcessId] -> Maybe ProcessId
+determineNeighbor pid [] = Nothing
+determineNeighbor pid ps =
+    (ps'!!).(+ 1) <$> elemIndex pid ps
+    where ps' = cycle ps

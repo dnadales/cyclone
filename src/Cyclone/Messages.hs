@@ -42,19 +42,19 @@ instance Binary Number
 
 instance Ord Number where
     n <= m =  timestamp n <= timestamp m
-           && who n <= who n
-           && value n <= value n
+           && who n <= who m
+           && value n <= value m
 
 instance Eq Number where
     n == m =  timestamp n == timestamp m
-           && who n == who n
-           && value n == value n
+           && who n == who m
+           && value n == value m
 
 -- | Make a @Number@ message, creating a timestamp with the current time, and adding it to it.
 mkNumber :: MonadIO m => ProcessId -> Double -> m Number
 mkNumber pid d = liftIO $ do
     t <- realToFrac <$> getPOSIXTime
-    return $ Number d t pid
+    return $ Number { value = d, timestamp = t, who = pid}
 
 -- | Stop sending messages.
 data QuietPlease = QuietPlease

@@ -4,6 +4,7 @@ module Cyclone
 where
 
 import           Control.Concurrent                                 (forkIO)
+import           Control.Concurrent.Async                           (race_)
 import qualified Data.Set                                           as Set
 
 import           Control.Concurrent                                 (threadDelay)
@@ -54,15 +55,20 @@ import           Cyclone.Messages                                   (Dump (Dump)
                                                                      value, who)
 import           Cyclone.State                                      (State, appendNumber,
                                                                      canTalk,
-                                                                     getNumber,
+                                                                     dequeueNumber,
+                                                                     enqueueNumber,
+                                                                     getDouble,
                                                                      getPeers,
                                                                      getReceivedNumbers,
                                                                      mkState,
+                                                                     neighbor,
+                                                                     reEnqueueWaiting,
                                                                      removePeer,
                                                                      setPeers,
                                                                      startTalk,
                                                                      stopTalk,
-                                                                     thisPid)
+                                                                     thisPid,
+                                                                     waitForAck)
 
 
 -- | Start a node with the given seed for the random number generator.
@@ -71,7 +77,10 @@ cycloneNode seed = do
     myPid     <- getSelfPid
     st        <- mkState myPid seed
     startTalk st
-    _ <- spawnLocal (talker st)
+    -- _ <- spawnLocal (talker st)
+    _ <- spawnLocal (generator st)
+    _ <- spawnLocal (sender st)
+    _ <- spawnLocal (watchdog st)
     forever $ receiveWait [ match $ handlePeers st
                           , match $ handleMonitorNotification st
                           , match $ handleNumber st
@@ -86,44 +95,30 @@ cycloneNode seed = do
           forM_ (filter (/= thisPid st) ps) monitor
           setPeers st ps
 
-      talker :: State -> Process ()
-      talker st = do
+      generator :: State -> Process ()
+      generator st = do
           b <- canTalk st
           when b $ do
-              d  <- getNumber st
+              waitForAck st
+              liftIO $ threadDelay 1000
+              d  <- getDouble st
               n  <- mkNumber (thisPid st) d
-              ps <- getPeers st
-              -- Send to all the process, excluding itself.
-              let ps' = filter (/= thisPid st) ps
-              -- This process register the number it generated, since it is
-              -- faster than performing a network operation.
-              handleNumber st n
-              forM_ ps' (`send` n)
-              talker st
+              enqueueNumber st n
+              generator st
 
-      -- generator :: State -> Process ()
-      -- generator st = do
-      --     b <- canTalk st
-      --     when b $ do
-      --         waitForAck st -- TODO: should wait for ack
-      --         d  <- getNumber st
-      --         n  <- mkNumber (thisPid st) d
-      --         enqueueNumber st n
-      --         generator st
+      watchdog :: State -> Process ()
+      watchdog st = forever $ do
+          liftIO $ race_ (threadDelay 100000 >> reEnqueueWaiting st) (waitForAck st)
 
-      -- watchDog :: State -> Process ()
-      -- watchDog st = forever $ do
-      --     threadDelay 10000
-      --     reEnqueueWaiting st
-
-      -- sender :: State -> Process ()
-      -- sender st = do
-      --     nPid <- neighbor st
-      --     n <- dequeueNumber st
-      --     send nPid n
+      sender :: State -> Process ()
+      sender st = forever $ do
+          nPid <- neighbor st
+          n <- dequeueNumber st
+          send nPid n
 
       handleNumber :: State -> Number -> Process ()
-      handleNumber st n = appendNumber st n
+      handleNumber st n = do
+          appendNumber st n
 
       handleMonitorNotification :: State
                                 -> ProcessMonitorNotification
@@ -136,9 +131,10 @@ cycloneNode seed = do
 
       handleDump :: State -> Dump -> Process ()
       handleDump st _ = do
-          ns <- getReceivedNumbers st
+          ns <- fmap sort $ getReceivedNumbers st -- TODO: we should need to sort this!
           let vals = sum $ map (uncurry (*)) $ zip [1..] (value <$> ns)
           say $ show (length ns, vals)
+          liftIO $ forM_ ns (putStrLn . show)
 
 remotable ['cycloneNode]
 
