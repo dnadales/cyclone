@@ -100,7 +100,7 @@ cycloneNode seed = do
           b <- canTalk st
           when b $ do
               waitForAck st
-              liftIO $ threadDelay 1000
+              -- liftIO $ threadDelay 1000
               d  <- getDouble st
               n  <- mkNumber (thisPid st) d
               enqueueNumber st n
@@ -108,7 +108,7 @@ cycloneNode seed = do
 
       watchdog :: State -> Process ()
       watchdog st = forever $ do
-          liftIO $ race_ (threadDelay 100000 >> reEnqueueWaiting st) (waitForAck st)
+          liftIO $ race_ (threadDelay 1000 >> reEnqueueWaiting st) (waitForAck st)
 
       sender :: State -> Process ()
       sender st = forever $ do
@@ -131,10 +131,10 @@ cycloneNode seed = do
 
       handleDump :: State -> Dump -> Process ()
       handleDump st _ = do
-          ns <- fmap sort $ getReceivedNumbers st -- TODO: we should need to sort this!
+          ns <- getReceivedNumbers st
           let vals = sum $ map (uncurry (*)) $ zip [1..] (value <$> ns)
           say $ show (length ns, vals)
-          liftIO $ forM_ ns (putStrLn . show)
+          -- liftIO $ forM_ ns (putStrLn . show)
 
 remotable ['cycloneNode]
 

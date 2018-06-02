@@ -121,7 +121,7 @@ appendNumber st n = liftIO $ atomically $ do
             unless (n `Set.member` ns) (writeTQueue (_outbound st) n)
             modifyTVar' (_inbound st) (Set.insert n)
 
--- | Retrieve all the numbers received so far.
+-- | Retrieve all the numbers received so far, sorted increasingly.
 getReceivedNumbers :: MonadIO m => State -> m [Number]
 getReceivedNumbers st = fmap Set.toAscList $
     liftIO $ readTVarIO (_inbound st)
