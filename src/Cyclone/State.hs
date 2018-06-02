@@ -15,6 +15,7 @@ module Cyclone.State
       -- ** Outbound queue
     , enqueueNumber
     , dequeueNumber
+    , waitForEmptyQueue
       -- ** Waiting queue
     , waiting
       -- ** Inbound queue
@@ -25,7 +26,7 @@ where
 
 import           Control.Concurrent.STM        (STM, atomically, retry)
 import           Control.Concurrent.STM.TQueue (TQueue, newTQueueIO, readTQueue,
-                                                writeTQueue)
+                                                tryReadTQueue, writeTQueue)
 import           Control.Concurrent.STM.TVar   (TVar, modifyTVar', newTVarIO,
                                                 readTVar, readTVarIO, writeTVar)
 import           Control.Distributed.Process   (ProcessId)
@@ -122,6 +123,11 @@ appendNumber :: MonadIO m => State -> Number -> m ()
 appendNumber st n = liftIO $ atomically $ do
     modifyTVar' (_inbound st) (n:)
     -- modifyTVar' (_waiting st) (Set.delete n)
+
+waitForEmptyQueue :: MonadIO m => State -> m ()
+waitForEmptyQueue st = liftIO $ atomically $ do
+    mElem <- tryReadTQueue (_outbound st)
+    maybe (return ()) (const retry) mElem
 
 -- | Retrieve all the numbers received so far.
 getReceivedNumbers :: MonadIO m => State -> m [Number]

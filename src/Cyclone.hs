@@ -55,6 +55,7 @@ import           Cyclone.State                                      (State, appe
                                                                      removePeer,
                                                                      setPeers,
                                                                      thisPid,
+                                                                     waitForEmptyQueue,
                                                                      waiting)
 
 
@@ -81,11 +82,11 @@ cycloneNode i = do
 
       talker :: State -> Process ()
       talker st = do
-          nPid <- neighbor st
+          nPid <- neighbor st -- WAIT! Till we have a process to send a number to
           say $ "My neighbor is: " ++ show nPid
           forever $ do
-              nPid <- neighbor st -- WAIT! Till we have a process to send a number to
-              liftIO $ threadDelay 10000
+              waitForEmptyQueue st
+              -- liftIO $ threadDelay 1000
               n <- mkNumber (thisPid st) 1
               enqueueNumber st n
 
