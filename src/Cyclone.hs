@@ -134,7 +134,6 @@ cycloneNode seed = do
           ns <- getReceivedNumbers st
           let vals = sum $ map (uncurry (*)) $ zip [1..] (value <$> ns)
           say $ show (length ns, vals)
-          -- liftIO $ forM_ ns (putStrLn . show)
 
 remotable ['cycloneNode]
 
