@@ -2,7 +2,7 @@
 -- | Helper program to launch multiple programs and redirect their output to a file.
 module Main where
 
-import           Control.Concurrent.Async (async, mapConcurrently, wait)
+import           Control.Concurrent.Async (async, mapConcurrently, waitCatch)
 import qualified Control.Foldl            as Fold
 import           Control.Monad            (void)
 import           Data.Monoid              (mempty)
@@ -37,7 +37,7 @@ main = do
             _     -> defaultCfgPath
     tmpPath <- getTemporaryDirectory
     as      <- fold (runPrograms (decodeString tmpPath) cfgPath) Fold.list
-    void $ mapConcurrently wait as
+    void $ mapConcurrently waitCatch as
     where
       runPrograms tmp cfgPath = do
           (n, line) <- nl $ input cfgPath

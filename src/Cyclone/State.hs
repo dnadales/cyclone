@@ -118,7 +118,8 @@ appendNumber st n = liftIO $ atomically $ do
            modifyTVar' (_inbound st) (Set.insert n)
         else do
             ns <- readTVar (_inbound st)
-            unless (n `Set.member` ns) (writeTQueue (_outbound st) n)
+            -- unless (n `Set.member` ns)
+            (writeTQueue (_outbound st) n)
             modifyTVar' (_inbound st) (Set.insert n)
 
 -- | Retrieve all the numbers received so far, sorted increasingly.

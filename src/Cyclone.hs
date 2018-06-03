@@ -77,7 +77,6 @@ cycloneNode seed = do
     myPid     <- getSelfPid
     st        <- mkState myPid seed
     startTalk st
-    -- _ <- spawnLocal (talker st)
     _ <- spawnLocal (generator st)
     _ <- spawnLocal (sender st)
     _ <- spawnLocal (watchdog st)
@@ -100,7 +99,6 @@ cycloneNode seed = do
           b <- canTalk st
           when b $ do
               waitForAck st
-              -- liftIO $ threadDelay 1000
               d  <- getDouble st
               n  <- mkNumber (thisPid st) d
               enqueueNumber st n
@@ -108,7 +106,8 @@ cycloneNode seed = do
 
       watchdog :: State -> Process ()
       watchdog st = forever $ do
-          liftIO $ race_ (threadDelay 1000 >> reEnqueueWaiting st) (waitForAck st)
+          -- For now we don't make the retry delay configurable or dynamic.
+          liftIO $ race_ (threadDelay 10000 >> reEnqueueWaiting st) (waitForAck st)
 
       sender :: State -> Process ()
       sender st = forever $ do
@@ -134,6 +133,7 @@ cycloneNode seed = do
           ns <- getReceivedNumbers st
           let vals = sum $ map (uncurry (*)) $ zip [1..] (value <$> ns)
           say $ show (length ns, vals)
+          liftIO $ forM_ ns (putStrLn . show)
 
 remotable ['cycloneNode]
 
