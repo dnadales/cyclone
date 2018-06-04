@@ -52,13 +52,16 @@ import           Cyclone.Messages                                   (Dump (Dump)
                                                                      QuietPlease (QuietPlease),
                                                                      mkNumber,
                                                                      value, who)
-import           Cyclone.State                                      (State, appendNumber,
+import           Cyclone.State                                      (State,
+                                                                     acqTalk,
+                                                                     appendNumber,
                                                                      canTalk,
                                                                      getNumber,
                                                                      getPeers,
                                                                      getReceivedNumbers,
                                                                      lastNumberOf,
                                                                      mkState,
+                                                                     relTalk,
                                                                      removePeer,
                                                                      setPeers,
                                                                      startTalk,
@@ -94,13 +97,17 @@ cycloneNode seed = do
               d  <- getNumber st
               n  <- mkNumber (thisPid st) d
               ps <- getPeers st
-              -- Send to all the process, excluding itself.
-              let ps' = filter (/= thisPid st) ps
               -- This process register the number it generated, since it is
               -- faster than performing a network operation.
               handleNumber st n
-              forM_ ps' (`send` n)
+              sendAll st ps n
               talker st
+
+      sendAll :: State -> [ProcessId] -> Number -> Process ()
+      sendAll st ps n = do
+          acqTalk st
+          forM_ ps (`send` n)
+          relTalk st
 
       handleNumber :: State -> Number -> Process ()
       handleNumber st n = appendNumber st n
@@ -113,8 +120,7 @@ cycloneNode seed = do
           -- Send the last number we saw to all the other peers
           mN <- lastNumberOf st pid
           ps <- getPeers st
-          let ps' = filter (/= thisPid st) ps
-          forM_ mN $ \n -> forM_ ps' (`send` n)
+          forM_ mN $ sendAll st ps
 
       handleQuiet :: State -> QuietPlease -> Process ()
       handleQuiet st _ = stopTalk st
@@ -124,7 +130,6 @@ cycloneNode seed = do
           ns <- getReceivedNumbers st
           let vals = sum $ zipWith (*) [1..] (value <$> ns)
           say $ show (length ns, vals)
-
 
 remotable ['cycloneNode]
 
@@ -146,20 +151,20 @@ master cfg  backend slaves = do
         say $ "Starting slave on " ++ show nid
         spawn nid $ $(mkClosure 'cycloneNode) (withSeed cfg)
     -- Send the process list to each slave
-    forM ps (`send` (Peers ps))
+    forM_ ps (`send` Peers ps)
     -- Allow the nodes to send messages
-    delay $ (sendFor cfg) * 1000000
-    forM ps (`send` QuietPlease)
+    delay $ sendFor cfg * 1000000
+    forM_ ps (`send` QuietPlease)
     let (waitForMgs, waitForCalc) = (floor (w * 0.7), floor (w * 0.3))
         w = toRational $ waitFor cfg * 1000000
     -- Use the @waitFor@ argument to determine a period in which the messages
     -- can be received before performing the final calculation.
     delay waitForMgs
-    forM ps (`send` Dump)
+    forM_ ps (`send` Dump)
     delay waitForCalc
     terminateAllSlaves backend
     where
-      delay mus = liftIO $ threadDelay $ mus
+      delay mus = liftIO $ threadDelay mus
 
 runCycloneSlave :: HostName -> ServiceName -> IO ()
 runCycloneSlave host port = do

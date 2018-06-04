@@ -15,6 +15,8 @@ module Cyclone.State
     , startTalk
     , canTalk
     , stopTalk
+    , acqTalk
+    , relTalk
       -- * Inbound queue
     , appendNumber
     , getReceivedNumbers
@@ -23,7 +25,8 @@ module Cyclone.State
     )
 where
 
-import           Control.Concurrent.MVar       (MVar, modifyMVar, newMVar)
+import           Control.Concurrent.MVar       (MVar, modifyMVar, newMVar,
+                                                putMVar, takeMVar)
 import           Control.Concurrent.STM        (STM, atomically, retry)
 import           Control.Concurrent.STM.TQueue (TQueue, newTQueueIO, readTQueue,
                                                 tryReadTQueue, writeTQueue)
@@ -34,6 +37,7 @@ import           Control.Monad.IO.Class        (MonadIO, liftIO)
 import           Data.List                     (cycle, elemIndex)
 import           Data.Map.Strict               (Map)
 import qualified Data.Map.Strict               as Map
+import           Data.Maybe                    (maybeToList)
 import           Data.Set                      (Set)
 import qualified Data.Set                      as Set
 import           System.Random                 (StdGen, mkStdGen, randomR)
@@ -51,8 +55,11 @@ data State = State
     , _talk       :: TVar Bool
     , -- | Random generator
       _rndGen     :: MVar StdGen
-    , -- | Last values received by a the peers
-      _lastNumber :: TVar (Map ProcessId Number)
+    , -- | Last values received by the peers
+      _lastNumber :: TVar (Map ProcessId [Number])
+    , -- | Lock to be acquired before start sending messages to peers, and
+      -- released afterwards.
+      _talkLock   :: MVar ()
     }
 
 -- | Create a new state, setting the given process id as the current process,
@@ -66,6 +73,7 @@ mkState pid seed = liftIO $
           <*> newTVarIO False -- Don't talk at the beginning.
           <*> newMVar (mkStdGen seed)
           <*> newTVarIO Map.empty
+          <*> newMVar ()
 
 -- | When a peer is set, the neighbor will be determined.
 --
@@ -82,13 +90,14 @@ removePeer st pid = liftIO $ atomically $ do
     oldPeers <- readTVar (_peers st)
     setPeersSTM st (filter (/= pid) oldPeers)
 
--- | Get the current list of peers, retrying if the list of peers is empty.
+-- | Get the current list of peers (not including the current process id),
+-- retrying if the list of peers is empty.
 getPeers :: MonadIO m => State -> m [ProcessId]
 getPeers st = liftIO $ atomically $ do
     ps <- readTVar (_peers st)
     if null ps
         then retry
-        else return ps
+        else return $ filter (/= thisPid st) ps
 
 -- | Append a @Number@ to the list of numbers received so far.
 --
@@ -97,7 +106,13 @@ getPeers st = liftIO $ atomically $ do
 appendNumber :: MonadIO m => State -> Number -> m ()
 appendNumber st n = liftIO $ atomically $ do
     modifyTVar' (_inbound st) (Set.insert n)
-    modifyTVar' (_lastNumber st) (Map.insert (who n) n)
+    modifyTVar' (_lastNumber st) (Map.insertWith f (who n) [n])
+    where
+      -- Add the number to the head of the list, while keeping always a
+      -- constant number of elements (we are not interested in old messages).
+      -- For now this number is not configurable.
+      f [x] ys = x : take 200 ys
+      f _ _    = undefined -- This cannot happen. Keeps the compiler happy.
 
 -- | Retrieve all the numbers received so far.
 getReceivedNumbers :: MonadIO m => State -> m [Number]
@@ -124,6 +139,14 @@ getNumber st = liftIO $ modifyMVar (_rndGen st) genValidDouble
             if v == 0 then genValidDouble g else return (g', v)
 
 -- | Retrieve the last number (if any), what we received from the given peer.
-lastNumberOf :: MonadIO m => State -> ProcessId -> m (Maybe Number)
-lastNumberOf st pid =
-    fmap (Map.lookup pid ) . liftIO . readTVarIO $ _lastNumber st
+lastNumberOf :: MonadIO m => State -> ProcessId -> m [Number]
+lastNumberOf st pid = fmap (concat . maybeToList . Map.lookup pid )
+                    . liftIO
+                    . readTVarIO
+                    $ _lastNumber st
+
+acqTalk :: MonadIO m => State -> m ()
+acqTalk st = liftIO $ takeMVar (_talkLock st)
+
+relTalk :: MonadIO m => State -> m ()
+relTalk st = liftIO $ putMVar (_talkLock st) ()
