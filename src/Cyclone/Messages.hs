@@ -11,6 +11,7 @@ module Cyclone.Messages
     , value
     , timestamp
     , who
+    , Repeat (..)
       -- * Termination
     , Dump (..)
     , QuietPlease (..)
@@ -39,6 +40,12 @@ data Number = Number
     } deriving (Eq, Ord, Show, Typeable, Generic)
 
 instance Binary Number
+
+-- | A messages is being repeated after a peer dies.
+newtype Repeat = Repeat Number
+    deriving (Eq, Ord, Show, Typeable, Generic)
+
+instance Binary Repeat
 
 -- | Make a @Number@ message, creating a timestamp with the current time, and adding it to it.
 mkNumber :: MonadIO m => ProcessId -> Double -> m Number

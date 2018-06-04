@@ -3,16 +3,12 @@ module Cyclone
     (runCyclone, runCycloneSlave)
 where
 
-import           Control.Concurrent                                 (forkIO)
-import qualified Data.Set                                           as Set
-
 import           Control.Concurrent                                 (threadDelay)
 import           Control.Distributed.Process                        (NodeId,
                                                                      Process,
                                                                      ProcessId,
                                                                      ProcessMonitorNotification (ProcessMonitorNotification),
                                                                      RemoteTable,
-                                                                     exit,
                                                                      getSelfPid,
                                                                      match,
                                                                      matchAny,
@@ -20,25 +16,21 @@ import           Control.Distributed.Process                        (NodeId,
                                                                      receiveWait,
                                                                      say, send,
                                                                      spawn,
-                                                                     spawnLocal,
-                                                                     terminate)
+                                                                     spawnLocal)
 import           Control.Distributed.Process.Backend.SimpleLocalnet (Backend, initializeBackend,
                                                                      startMaster,
                                                                      startSlave,
                                                                      terminateAllSlaves)
 import           Control.Distributed.Process.Closure                (mkClosure,
                                                                      remotable)
-import           Control.Distributed.Process.Node                   (initRemoteTable,
-                                                                     runProcess)
+import           Control.Distributed.Process.Node                   (initRemoteTable)
 import           Control.Monad                                      (forM,
                                                                      forM_,
                                                                      forever,
                                                                      when)
 import           Control.Monad.IO.Class                             (liftIO)
 import           Data.Binary                                        (Binary)
-import           Data.List                                          (sort)
 import           Data.Typeable                                      (Typeable)
-import           GHC.Generics                                       (Generic)
 import           Network.Socket                                     (HostName,
                                                                      ServiceName)
 
@@ -50,11 +42,13 @@ import           Cyclone.Messages                                   (Dump (Dump)
                                                                      Number,
                                                                      Peers (Peers),
                                                                      QuietPlease (QuietPlease),
+                                                                     Repeat (Repeat),
                                                                      mkNumber,
-                                                                     value, who)
+                                                                     value)
 import           Cyclone.State                                      (State,
                                                                      acqTalk,
                                                                      appendNumber,
+                                                                     appendRepeatNumber,
                                                                      canTalk,
                                                                      getNumber,
                                                                      getPeers,
@@ -79,6 +73,7 @@ cycloneNode seed = do
     forever $ receiveWait [ match $ handlePeers st
                           , match $ handleMonitorNotification st
                           , match $ handleNumber st
+                          , match $ handleRepeat st
                           , match $ handleQuiet st
                           , match $ handleDump st
                           , matchAny $ \msg -> say $
@@ -103,14 +98,15 @@ cycloneNode seed = do
               sendAll st ps n
               talker st
 
-      sendAll :: State -> [ProcessId] -> Number -> Process ()
-      sendAll st ps n = do
+      sendAll :: (Typeable a, Binary a)
+              => State -> [ProcessId] -> a -> Process ()
+      sendAll st ps a = do
           acqTalk st
-          forM_ ps (`send` n)
+          forM_ ps (`send` a)
           relTalk st
 
       handleNumber :: State -> Number -> Process ()
-      handleNumber st n = appendNumber st n
+      handleNumber = appendNumber
 
       handleMonitorNotification :: State
                                 -> ProcessMonitorNotification
@@ -120,7 +116,10 @@ cycloneNode seed = do
           -- Send the last number we saw to all the other peers
           mN <- lastNumberOf st pid
           ps <- getPeers st
-          forM_ mN $ sendAll st ps
+          forM_ mN $ \n -> sendAll st ps (Repeat n)
+
+      handleRepeat :: State -> Repeat -> Process ()
+      handleRepeat = appendRepeatNumber
 
       handleQuiet :: State -> QuietPlease -> Process ()
       handleQuiet st _ = stopTalk st

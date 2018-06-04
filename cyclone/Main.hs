@@ -55,7 +55,7 @@ main = do
     cfg   <- getCfg args
     -- Note that we don't validate the host string.
     let host = getArgWithDefault args defaultHost (longOption "host")
-    if (args `isPresent` command "slave")
+    if args `isPresent` command "slave"
        then runCycloneSlave host port
        else runCyclone cfg host port
     where

@@ -34,4 +34,4 @@ mkConfig sFor wFor wSeed  = validationToEither $
     where
       valTimeInterval t what
           | 0 <= t = Success t
-          | otherwise = Failure $ [what ++ " must be non-negative"]
+          | otherwise = Failure [what ++ " must be non-negative"]

@@ -22,27 +22,25 @@ module Cyclone.State
     , getReceivedNumbers
     , getNumber
     , lastNumberOf
+    , appendRepeatNumber
     )
 where
 
-import           Control.Concurrent.MVar       (MVar, modifyMVar, newMVar,
-                                                putMVar, takeMVar)
-import           Control.Concurrent.STM        (STM, atomically, retry)
-import           Control.Concurrent.STM.TQueue (TQueue, newTQueueIO, readTQueue,
-                                                tryReadTQueue, writeTQueue)
-import           Control.Concurrent.STM.TVar   (TVar, modifyTVar', newTVarIO,
-                                                readTVar, readTVarIO, writeTVar)
-import           Control.Distributed.Process   (ProcessId)
-import           Control.Monad.IO.Class        (MonadIO, liftIO)
-import           Data.List                     (cycle, elemIndex)
-import           Data.Map.Strict               (Map)
-import qualified Data.Map.Strict               as Map
-import           Data.Maybe                    (maybeToList)
-import           Data.Set                      (Set)
-import qualified Data.Set                      as Set
-import           System.Random                 (StdGen, mkStdGen, randomR)
+import           Control.Concurrent.MVar     (MVar, modifyMVar, newMVar,
+                                              putMVar, takeMVar)
+import           Control.Concurrent.STM      (STM, atomically, retry)
+import           Control.Concurrent.STM.TVar (TVar, modifyTVar', newTVarIO,
+                                              readTVar, readTVarIO, writeTVar)
+import           Control.Distributed.Process (ProcessId)
+import           Control.Monad.IO.Class      (MonadIO, liftIO)
+import           Data.Map.Strict             (Map)
+import qualified Data.Map.Strict             as Map
+import           Data.Maybe                  (maybeToList)
+import           Data.Set                    (Set)
+import qualified Data.Set                    as Set
+import           System.Random               (StdGen, mkStdGen, randomR)
 
-import           Cyclone.Messages              (Number, who)
+import           Cyclone.Messages            (Number, Repeat (Repeat), who)
 
 data State = State
     { -- | List of peers known so far.
@@ -81,7 +79,7 @@ setPeers :: MonadIO m => State -> [ProcessId] -> m ()
 setPeers st ps = liftIO $ atomically $ setPeersSTM st ps
 
 setPeersSTM :: State -> [ProcessId] -> STM ()
-setPeersSTM st ps = writeTVar (_peers st) ps
+setPeersSTM st = writeTVar (_peers st)
 
 -- | Remove a peer from the list. If the process that was removed is the
 -- neighbor of the current process, then the new neighbor is updated.
@@ -150,3 +148,10 @@ acqTalk st = liftIO $ takeMVar (_talkLock st)
 
 relTalk :: MonadIO m => State -> m ()
 relTalk st = liftIO $ putMVar (_talkLock st) ()
+
+-- | Like append number, but without inserting the message in the list of
+-- messages seeing by a peer, since this is a repeated message sent when a peer
+-- dies.
+appendRepeatNumber :: MonadIO m => State -> Repeat -> m ()
+appendRepeatNumber st (Repeat n) = liftIO $ atomically $
+    modifyTVar' (_inbound st) (Set.insert n)
