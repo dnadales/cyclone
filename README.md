@@ -2,8 +2,16 @@
 
 A simple example on the use of
 [`distributed-process`](https://github.com/haskell-distributed/distributed-process)
-to model a network of nodes that continuously send random numbers (in the
-interval `(0, 1]`) to each other.
+to model a network of nodes that continuously send to each other random numbers
+in the interval `(0, 1]`. The nodes send message for a given period of time (see
+`--send-for`), after which a grace period (see `--wait-for`) is started in
+which each node calculates the following result:
+
+```haskell
+sum $ zipWith (*) [1..] (value <$> ns)
+```
+
+where `ns` is the list of received numbers, ordered by timestamp.
 
 ## Installation
 
@@ -78,3 +86,17 @@ stack exec cyclone-spawn test/basic.config & \
 
 See the [`test`](test/) directory for a list of nodes configurations to test
 the program with.
+
+## What works and what doesn't
+
+`cyclone` seems to work under no-failure scenarios. However, due to the large
+number of messages being sent, of test cases such as
+[`test/large-no-failures.config`](`test/large-no-failures.config`), a large
+grace period is needed for all the messages to arrive to all the nodes after
+the sending period.
+
+Upon a node failure, the other nodes re-send to each other the last messages
+they saw from the node that failed. While this approach seems to work fine for
+the [`test/single-failure.config`](`test/single-failure.config`) scenario
+(given a large enough grace period), other failure scenarios produce
+inconsistent results.

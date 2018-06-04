@@ -109,7 +109,7 @@ appendNumber st n = liftIO $ atomically $ do
       -- Add the number to the head of the list, while keeping always a
       -- constant number of elements (we are not interested in old messages).
       -- For now this number is not configurable.
-      f [x] ys = x : take 200 ys
+      f [x] ys = x : take 10 ys
       f _ _    = undefined -- This cannot happen. Keeps the compiler happy.
 
 -- | Retrieve all the numbers received so far.
@@ -150,7 +150,7 @@ relTalk :: MonadIO m => State -> m ()
 relTalk st = liftIO $ putMVar (_talkLock st) ()
 
 -- | Like append number, but without inserting the message in the list of
--- messages seeing by a peer, since this is a repeated message sent when a peer
+-- messages seen by a peer, since this is a repeated message sent when a peer
 -- dies.
 appendRepeatNumber :: MonadIO m => State -> Repeat -> m ()
 appendRepeatNumber st (Repeat n) = liftIO $ atomically $
