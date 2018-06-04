@@ -48,7 +48,7 @@ Pass the `--help` flag to `cyclone` to see all the available options.
 For convenience, we also provide a helper tool called `cyclone-spawn` (which
 can be built and executed as described above), which allows to run a series of
 commands that are specified in a configuration file (see
-[`.cyclone-spawn.config`](.cyclone-spawn.config)). By means of this
+[`test/basic.config`](test/basic.config)). By means of this
 configuration file, several nodes can be started:
 
 ```sh
@@ -72,12 +72,9 @@ timeout 7 stack exec cyclone -- slave -p 9096
 To test the program, you could use a command like the following:
 
 ```sh
-stack exec cyclone-spawn & \
+stack exec cyclone-spawn test/basic.config & \
 (sleep 1; stack exec cyclone -- --send-for 3 --wait-for 1 --with-seed 8475)
 ```
 
-Or with a custom configuration file:
-```sh
-stack exec cyclone-spawn  -- .cyclone-spawn-failures.config & \
- (sleep 1; stack exec cyclone -- --send-for 13 --wait-for 1 --with-seed 8475)
-```
+See the [`test`](test/) directory for a list of nodes configurations to test
+the program with.
