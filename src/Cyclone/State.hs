@@ -6,19 +6,20 @@ module Cyclone.State
     ( -- * State
       State
     , mkState
-      -- * Functions on the peers list
+      -- * Peers
     , setPeers
     , removePeer
     , getPeers
     , thisPid
+      -- * Message sending logic
     , startTalk
     , canTalk
     , stopTalk
-      -- * Inbound queue manipulation
+      -- * Inbound queue
     , appendNumber
     , getReceivedNumbers
-    -- * Random number generation
     , getNumber
+    , lastNumberOf
     )
 where
 
@@ -31,23 +32,27 @@ import           Control.Concurrent.STM.TVar   (TVar, modifyTVar', newTVarIO,
 import           Control.Distributed.Process   (ProcessId)
 import           Control.Monad.IO.Class        (MonadIO, liftIO)
 import           Data.List                     (cycle, elemIndex)
+import           Data.Map.Strict               (Map)
+import qualified Data.Map.Strict               as Map
 import           Data.Set                      (Set)
 import qualified Data.Set                      as Set
 import           System.Random                 (StdGen, mkStdGen, randomR)
 
-import           Cyclone.Messages              (Number)
+import           Cyclone.Messages              (Number, who)
 
 data State = State
     { -- | List of peers known so far.
-      _peers   :: TVar [ProcessId]
+      _peers      :: TVar [ProcessId]
       -- | Process id of the current process (where the state was created).
-    , thisPid  :: ProcessId
+    , thisPid     :: ProcessId
       -- | List of numbers received so far.
-    , _inbound :: TVar [Number]
+    , _inbound    :: TVar (Set Number)
       -- | Can messages be sent?
-    , _talk    :: TVar Bool
+    , _talk       :: TVar Bool
     , -- | Random generator
-      _rndGen  :: MVar StdGen
+      _rndGen     :: MVar StdGen
+    , -- | Last values received by a the peers
+      _lastNumber :: TVar (Map ProcessId Number)
     }
 
 -- | Create a new state, setting the given process id as the current process,
@@ -57,9 +62,10 @@ mkState :: MonadIO m => ProcessId -> Int -> m State
 mkState pid seed = liftIO $
     State <$> newTVarIO []
           <*> pure pid
-          <*> newTVarIO []
+          <*> newTVarIO Set.empty
           <*> newTVarIO False -- Don't talk at the beginning.
           <*> newMVar (mkStdGen seed)
+          <*> newTVarIO Map.empty
 
 -- | When a peer is set, the neighbor will be determined.
 --
@@ -90,12 +96,13 @@ getPeers st = liftIO $ atomically $ do
 -- acknowledgment, then it is removed from it.
 appendNumber :: MonadIO m => State -> Number -> m ()
 appendNumber st n = liftIO $ atomically $ do
-    modifyTVar' (_inbound st) (n:)
-    -- modifyTVar' (_waiting st) (Set.delete n)
+    modifyTVar' (_inbound st) (Set.insert n)
+    modifyTVar' (_lastNumber st) (Map.insert (who n) n)
 
 -- | Retrieve all the numbers received so far.
 getReceivedNumbers :: MonadIO m => State -> m [Number]
-getReceivedNumbers st = liftIO $ readTVarIO (_inbound st)
+getReceivedNumbers st =
+    fmap Set.toAscList . liftIO  . readTVarIO $ _inbound st
 
 -- | Signal that a process can start talking.
 startTalk :: MonadIO m => State -> m ()
@@ -116,4 +123,7 @@ getNumber st = liftIO $ modifyMVar (_rndGen st) genValidDouble
         genValidDouble g = let (v, g') = randomR (0, 1) g in
             if v == 0 then genValidDouble g else return (g', v)
 
-
+-- | Retrieve the last number (if any), what we received from the given peer.
+lastNumberOf :: MonadIO m => State -> ProcessId -> m (Maybe Number)
+lastNumberOf st pid =
+    fmap (Map.lookup pid ) . liftIO . readTVarIO $ _lastNumber st

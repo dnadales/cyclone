@@ -11,7 +11,7 @@ module Cyclone.Messages
     , value
     , timestamp
     , who
-      -- * Finish
+      -- * Termination
     , Dump (..)
     , QuietPlease (..)
     )
@@ -36,19 +36,9 @@ data Number = Number
     , timestamp :: Double
     -- | Process id that sent the message.
     , who       :: ProcessId
-    } deriving (Show, Typeable, Generic)
+    } deriving (Eq, Ord, Show, Typeable, Generic)
 
 instance Binary Number
-
-instance Ord Number where
-    n <= m =  timestamp n <= timestamp m
-           && who n <= who n
-           && value n <= value n
-
-instance Eq Number where
-    n == m =  timestamp n == timestamp m
-           && who n == who n
-           && value n == value n
 
 -- | Make a @Number@ message, creating a timestamp with the current time, and adding it to it.
 mkNumber :: MonadIO m => ProcessId -> Double -> m Number

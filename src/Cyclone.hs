@@ -57,6 +57,7 @@ import           Cyclone.State                                      (State, appe
                                                                      getNumber,
                                                                      getPeers,
                                                                      getReceivedNumbers,
+                                                                     lastNumberOf,
                                                                      mkState,
                                                                      removePeer,
                                                                      setPeers,
@@ -107,8 +108,13 @@ cycloneNode seed = do
       handleMonitorNotification :: State
                                 -> ProcessMonitorNotification
                                 -> Process ()
-      handleMonitorNotification st (ProcessMonitorNotification _ pid _) =
+      handleMonitorNotification st (ProcessMonitorNotification _ pid _) = do
           removePeer st pid
+          -- Send the last number we saw to all the other peers
+          mN <- lastNumberOf st pid
+          ps <- getPeers st
+          let ps' = filter (/= thisPid st) ps
+          forM_ mN $ \n -> forM_ ps' (`send` n)
 
       handleQuiet :: State -> QuietPlease -> Process ()
       handleQuiet st _ = stopTalk st
@@ -116,8 +122,7 @@ cycloneNode seed = do
       handleDump :: State -> Dump -> Process ()
       handleDump st _ = do
           ns <- getReceivedNumbers st
-          let ms = sort ns
-              vals = sum $ map (uncurry (*)) $ zip [1..] (value <$> ms)
+          let vals = sum $ zipWith (*) [1..] (value <$> ns)
           say $ show (length ns, vals)
 
 
