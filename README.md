@@ -91,12 +91,12 @@ the program with.
 
 `cyclone` seems to work under no-failure scenarios. However, due to the large
 number of messages being sent, of test cases such as
-[`test/large-no-failures.config`](`test/large-no-failures.config`), a large
+[`test/large-no-failures.config`](test/large-no-failures.config), a large
 grace period is needed for all the messages to arrive to all the nodes after
 the sending period.
 
 Upon a node failure, the other nodes re-send to each other the last messages
 they saw from the node that failed. While this approach seems to work fine for
-the [`test/single-failure.config`](`test/single-failure.config`) scenario
+the [`test/single-failure.config`](test/single-failure.config) scenario
 (given a large enough grace period), other failure scenarios produce
 inconsistent results.
